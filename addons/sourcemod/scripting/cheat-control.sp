@@ -187,25 +187,25 @@ public Action OnCheatCommand(int client, const char[] command, int argc) {
 	if (GetConVarBool(cheatcontrol_enablewarnings)) {
 		playerWarnings[client]++;
 
-		if (playerWarnings[client] == maxWarnings) {
+		if (playerWarnings[client] >= maxWarnings) {
+			playerWarnings[client] = maxWarnings;
 			KickClient(client, "[Cheat-Control] Permission denied to command %s - max. number of warnings reached", command);
 			if (GetConVarBool(cheatcontrol_printtodiscord)) {
-				CheatControlNotify(client, KICKED, "%N tried to execute cheat-command: '%s' - Kicked", client, command, playerWarnings[client], maxWarnings);
+				CheatControlNotify(client, KICKED, "%N tried to execute cheat-command: '%s' - max. number of warnings reached - Kicked", client, command, playerWarnings[client], maxWarnings);
 			}
 			return Plugin_Handled;
 		} else {
 			PrintToChat(client,"\x04[Cheat-Control] \x01Permission denied to command %s - \x04%d\x01/\x04%d \x01warnings", command, playerWarnings[client], maxWarnings);
+			
+			if (GetConVarBool(cheatcontrol_printtodiscord)) {
+				CheatControlNotify(client, DETECTION, "%N tried to execute cheat-command: '%s' - %i/%i warnings", client, command, playerWarnings[client], maxWarnings);
+			}
+
+			if (GetConVarBool(cheatcontrol_printtoadmins)) {
+				PrintToChatAdmins("\x04[Cheat-Control] \x01Player %N tried to execute cheat-command: %s - \x04%d\x01/\x04%d \x01warnings", client, command, playerWarnings[client], maxWarnings);
+			}
 		}
 	}
-
-	if (GetConVarBool(cheatcontrol_printtodiscord)) {
-		CheatControlNotify(client, DETECTION, "%N tried to execute cheat-command: '%s' - %i/%i warnings", client, command, playerWarnings[client], maxWarnings);
-	}
-
-	if (GetConVarBool(cheatcontrol_printtoadmins)) {
-		PrintToChatAdmins("\x04[Cheat-Control] \x01Player %N tried to execute cheat-command: %s - \x04%d\x01/\x04%d \x01warnings", client, command, playerWarnings[client], maxWarnings);
-	}
-	
 	return Plugin_Handled;
 }
 
@@ -394,24 +394,27 @@ bool CanClientUseImpulse(int client, int impulse) {
 	
 	if (GetConVarBool(cheatcontrol_enablewarnings)) {
 		playerWarnings[client]++;
-		if (playerWarnings[client] == maxWarnings) {
+		if (playerWarnings[client] >= maxWarnings) {
+			playerWarnings[client] = maxWarnings;
 			KickClient(client, "[Cheat-Control] Permission denied to impulse %d - max. number of warnings reached", impulse);
 			if (GetConVarBool(cheatcontrol_printtoadmins)) {
-				CheatControlNotify(client, KICKED, "%N tried to execute cheat-impulse: '%d' - Kicked", client, impulse, playerWarnings[client], maxWarnings);
+				CheatControlNotify(client, KICKED, "%N tried to execute cheat-impulse: '%d' - max. number of warnings reached - Kicked", client, impulse);
 			}
 			return false;
 		} else {
 			PrintToChat(client,"\x04[Cheat-Control] \x01Permission denied to impulse %d - \x04%d\x01/\x04%d \x01warnings", impulse, playerWarnings[client], maxWarnings);
+			
+			if (GetConVarBool(cheatcontrol_printtodiscord)) {
+				CheatControlNotify(client, DETECTION, "%N tried to execute cheat-impulse: '%d' - %i/%i warnings", client, impulse, playerWarnings[client], maxWarnings);
+			}
+
+			if (GetConVarBool(cheatcontrol_printtoadmins)) {
+				PrintToChatAdmins("\x04[Cheat-Control] \x01Player %N tried to execute cheat-impulse: %d - \x04%d\x01/\x04%d \x01warnings", client, impulse, playerWarnings[client], maxWarnings);
+			}
 		}
 	}
 	
-	if (GetConVarBool(cheatcontrol_printtodiscord)) {
-		CheatControlNotify(client, DETECTION, "%N tried to execute cheat-impulse: '%d' - %i/%i warnings", client, impulse, playerWarnings[client], maxWarnings);
-	}
 
-	if (GetConVarBool(cheatcontrol_printtoadmins)) {
-		PrintToChatAdmins("\x04[Cheat-Control] \x01Player %N tried to execute cheat-impulse: %d - \x04%d\x01/\x04%d \x01warnings", client, impulse, playerWarnings[client], maxWarnings);
-	}
 	
 	return false;
 }
