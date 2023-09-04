@@ -7,11 +7,12 @@
 #include <discord>
 #include <json>
 #include <SteamWorks>
+#include <sourcebanspp>
 
 #define PLUGIN_NAME		"Cheat Control"
 #define PLUGIN_AUTHOR	"Berni, dragonisser"
 #define PLUGIN_DESC		"Allows admins to use cheat commands, cheat impulses and cheat cvars, and blocks them for none admins"
-#define PLUGIN_VERSION 	"1.6"
+#define PLUGIN_VERSION 	"1.6.1"
 #define PLUGIN_URL		"http://forums.alliedmods.net/showthread.php?p=600521"
 #define PLUGIN_PREFIX	"[CC]"
 
@@ -51,11 +52,15 @@ Handle cheatcontrol_enablewarnings;
 Handle cheatcontrol_maxwarnings;
 Handle cheatcontrol_printtoadmins;
 Handle cheatcontrol_stripnotifyflag;
-Handle cheatcontrol_printtodiscord;
+Handle cheatcontrol_discordnotifyonwarn;
+Handle cheatcontrol_discordnotifyonkick;
+Handle cheatcontrol_discordnotifyonban;
+Handle cheatcontrol_sbbantime;
 
 // Others
 int playerWarnings[MAXPLAYERS];
 bool bDiscordAvailable;
+bool bSourceBansAvailable;
 char hostipandport[24];
 Handle adt_allowedCommands;
 Handle adt_allowedImpulses;
@@ -65,8 +70,9 @@ int cheatImpulses[] = {
 };
 
 enum MessageType {
-	DETECTION = 1,
-	KICKED = 2
+	WARN = 1,
+	KICKED = 2,
+	BANNED = 3
 };
 
 
@@ -86,12 +92,15 @@ public void OnPluginStart() {
 	// Set it to the correct version, in case the plugin gets updated...
 	SetConVarString(cheatcontrol_version, PLUGIN_VERSION);
 
-	cheatcontrol_adminsonly			= CreateConVar("cheatcontrol_enable",			"1", 	"Enable/disable this plugin (disabling it enables usage of cheats for everyone)");
-	cheatcontrol_enablewarnings		= CreateConVar("cheatcontrol_enablewarnings",	"1",	"Enable the cheatcontrol warning system"										);
-	cheatcontrol_maxwarnings		= CreateConVar("cheatcontrol_maxwarnings",		"5",	"Max warnings a player gets after he will be kicked"							);
-	cheatcontrol_printtoadmins		= CreateConVar("cheatcontrol_printtoadmins",	"0",	"Set if to forward warning messages to admins or not"							);
-	cheatcontrol_stripnotifyflag	= CreateConVar("cheatcontrol_stripnotifyflag",	"1",	"Sets if to strip the notification flag from sv_cheats or not"					);
-	cheatcontrol_printtodiscord 	= CreateConVar("cheatcontrol_printtodiscord",	"1",	"Set if to forward warning messages to discord webhook"							);
+	cheatcontrol_adminsonly				= CreateConVar("cheatcontrol_enable",			"1", 	"Enable/disable this plugin (disabling it enables usage of cheats for everyone)");
+	cheatcontrol_enablewarnings			= CreateConVar("cheatcontrol_enablewarnings",	"1",	"Enable the cheatcontrol warning system"										);
+	cheatcontrol_maxwarnings			= CreateConVar("cheatcontrol_maxwarnings",		"5",	"Max warnings a player gets after he will be kicked"							);
+	cheatcontrol_printtoadmins			= CreateConVar("cheatcontrol_printtoadmins",	"0",	"Set if to forward warning messages to admins or not"							);
+	cheatcontrol_stripnotifyflag		= CreateConVar("cheatcontrol_stripnotifyflag",	"1",	"Sets if to strip the notification flag from sv_cheats or not"					);
+	cheatcontrol_discordnotifyonwarn 	= CreateConVar("cheatcontrol_discordnotifyonwarn",	"0",	"Set if warning messages should be forwarded to discord"					);
+	cheatcontrol_discordnotifyonkick 	= CreateConVar("cheatcontrol_discordnotifyonkick",	"1",	"Set if kick messages should be forwarded to discord"						);
+	cheatcontrol_discordnotifyonban 	= CreateConVar("cheatcontrol_discordnotifyonban",	"1",	"Set if ban messages should be forwarded to discord"						);
+	cheatcontrol_sbbantime		 		= CreateConVar("cheatcontrol_sbbantime",		"1440",	"The time in minutes sourcebans (if installed) bans a client. 0 = Permanent"	);
 
 
 	// We need to hook this one cvar to react on changes
@@ -122,10 +131,14 @@ public void OnPluginStart() {
 	adt_allowedCommands = CreateArray(64);
 	adt_allowedImpulses = CreateArray();
 
-	if (GetFeatureStatus(FeatureType_Native, "Discord_SendMessage") == FeatureStatus_Available)
-	{
+	if (GetFeatureStatus(FeatureType_Native, "Discord_SendMessage") == FeatureStatus_Available) {
 		LogMessage("Detected Discord.smx on startup");
 		bDiscordAvailable = true;
+	}
+
+	if (GetFeatureStatus(FeatureType_Native, "SBPP_BanPlayer") == FeatureStatus_Available) {
+		LogMessage("Detected Sourcebans.smx on startup");
+		bSourceBansAvailable = true;
 	}
 
 	char hostport[8];
@@ -179,6 +192,7 @@ public Action OnCheatCommand(int client, const char[] command, int argc) {
 		
 		if (StrEqual(buf, command, false)) {
 			return Plugin_Continue;
+
 		}
 	}
 	
@@ -187,10 +201,20 @@ public Action OnCheatCommand(int client, const char[] command, int argc) {
 	if (GetConVarBool(cheatcontrol_enablewarnings)) {
 		playerWarnings[client]++;
 
-		if (playerWarnings[client] == maxWarnings) {
-			KickClient(client, "[Cheat-Control] Permission denied to command %s - max. number of warnings reached", command);
-			if (GetConVarBool(cheatcontrol_printtodiscord)) {
-				CheatControlNotify(client, KICKED, "%N tried to execute cheat-command: '%s' - Kicked", client, command, playerWarnings[client], maxWarnings);
+		if (playerWarnings[client] >= maxWarnings) {
+			if (bSourceBansAvailable) {
+				char reason[48];
+				Format(reason, sizeof(reason), "Permission denied to command %s", command);
+				SBPP_BanPlayer(0, client, GetConVarInt(cheatcontrol_sbbantime), reason);
+				if (GetConVarBool(cheatcontrol_discordnotifyonban)) {
+					Format(reason, sizeof(reason), GetConVarInt(cheatcontrol_sbbantime) == 0 ? "Banned permant" : "Banned for %i minute(s)", GetConVarInt(cheatcontrol_sbbantime));
+					CheatControlNotify(client, BANNED, "%N tried to execute cheat-command: '%s' - %s", client, command, reason);
+				}
+			} else {
+				KickClient(client, "[Cheat-Control] Permission denied to command %s - max. number of warnings reached", command);
+				if (GetConVarBool(cheatcontrol_discordnotifyonkick)) {
+					CheatControlNotify(client, KICKED, "%N tried to execute cheat-command: '%s' - Kicked", client, command, playerWarnings[client], maxWarnings);
+				}
 			}
 			return Plugin_Handled;
 		} else {
@@ -198,8 +222,8 @@ public Action OnCheatCommand(int client, const char[] command, int argc) {
 		}
 	}
 
-	if (GetConVarBool(cheatcontrol_printtodiscord)) {
-		CheatControlNotify(client, DETECTION, "%N tried to execute cheat-command: '%s' - %i/%i warnings", client, command, playerWarnings[client], maxWarnings);
+	if (GetConVarBool(cheatcontrol_discordnotifyonwarn)) {
+		CheatControlNotify(client, WARN, "%N tried to execute cheat-command: '%s' - %i/%i warnings", client, command, playerWarnings[client], maxWarnings);
 	}
 
 	if (GetConVarBool(cheatcontrol_printtoadmins)) {
@@ -394,10 +418,20 @@ bool CanClientUseImpulse(int client, int impulse) {
 	
 	if (GetConVarBool(cheatcontrol_enablewarnings)) {
 		playerWarnings[client]++;
-		if (playerWarnings[client] == maxWarnings) {
-			KickClient(client, "[Cheat-Control] Permission denied to impulse %d - max. number of warnings reached", impulse);
-			if (GetConVarBool(cheatcontrol_printtoadmins)) {
-				CheatControlNotify(client, KICKED, "%N tried to execute cheat-impulse: '%d' - Kicked", client, impulse, playerWarnings[client], maxWarnings);
+		if (playerWarnings[client] >= maxWarnings) {
+			if (bSourceBansAvailable) {
+				char reason[48];
+				Format(reason, sizeof(reason), "Permission denied to impulse %d", impulse);
+				SBPP_BanPlayer(0, client, GetConVarInt(cheatcontrol_sbbantime), reason);
+				if (GetConVarBool(cheatcontrol_discordnotifyonban)) {
+					Format(reason, sizeof(reason), GetConVarInt(cheatcontrol_sbbantime) == 0 ? "Banned permant" : "Banned for %i minute(s)", GetConVarInt(cheatcontrol_sbbantime));
+					CheatControlNotify(client, BANNED, "%N tried to execute cheat-impulse: '%d' - %s", client, impulse, reason);
+				}
+			} else {
+				KickClient(client, "[Cheat-Control] Permission denied to impulse %d - max. number of warnings reached", impulse);
+				if (GetConVarBool(cheatcontrol_discordnotifyonkick)) {
+					CheatControlNotify(client, KICKED, "%N tried to execute cheat-impulse: '%d' - Kicked", client, impulse, playerWarnings[client], maxWarnings);
+				}
 			}
 			return false;
 		} else {
@@ -405,8 +439,8 @@ bool CanClientUseImpulse(int client, int impulse) {
 		}
 	}
 	
-	if (GetConVarBool(cheatcontrol_printtodiscord)) {
-		CheatControlNotify(client, DETECTION, "%N tried to execute cheat-impulse: '%d' - %i/%i warnings", client, impulse, playerWarnings[client], maxWarnings);
+	if (GetConVarBool(cheatcontrol_discordnotifyonwarn)) {
+		CheatControlNotify(client, WARN, "%N tried to execute cheat-impulse: '%d' - %i/%i warnings", client, impulse, playerWarnings[client], maxWarnings);
 	}
 
 	if (GetConVarBool(cheatcontrol_printtoadmins)) {
@@ -650,7 +684,6 @@ void CheatControlNotify(int client, MessageType messageType, char[] message, any
 
 		if (GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid)))
 		{
-			PrintToServer("steamid: %s", steamid);
 			Format(steamidlink, sizeof(steamidlink), "[%s](https://steamid.io/lookup/%s)", steamid, steamid);
 		}
 		else
@@ -666,13 +699,17 @@ void CheatControlNotify(int client, MessageType messageType, char[] message, any
 
 	JSON_Object detectOrMsgfield = new JSON_Object();
 	switch(messageType) {
-		case DETECTION:
+		case WARN:
 		{
-			detectOrMsgfield.SetString("name", "Detection");
+			detectOrMsgfield.SetString("name", "Warn");
 		}
 		case KICKED:
 		{
 			detectOrMsgfield.SetString("name", "Kicked");
+		}
+		case BANNED:
+		{
+			detectOrMsgfield.SetString("name", "Banned");
 		}
 		default:
 		{
@@ -745,13 +782,17 @@ void CheatControlNotify(int client, MessageType messageType, char[] message, any
 	char notifType[64];
 
 	switch(messageType) {
-		case DETECTION:
+		case WARN:
 		{
-			Format(notifType, sizeof(notifType), "Cheat-Control v%s %s", PLUGIN_VERSION, "Client Detection");
+			Format(notifType, sizeof(notifType), "Cheat-Control v%s %s", PLUGIN_VERSION, "Client Warn");
 		}
 		case KICKED:
 		{
 			Format(notifType, sizeof(notifType), "Cheat-Control v%s %s", PLUGIN_VERSION, "Client Kicked");
+		}
+		case BANNED:
+		{
+			Format(notifType, sizeof(notifType), "Cheat-Control v%s %s", PLUGIN_VERSION, "Client Banned");
 		}
 		default:
 		{
@@ -773,7 +814,6 @@ void CheatControlNotify(int client, MessageType messageType, char[] message, any
 	rootEmbeds.Encode(output, sizeof(output));
 
 	json_cleanup_and_delete(rootEmbeds);
-	PrintToServer(output);
 	SendMessageToDiscord(output);
 
 	return;
