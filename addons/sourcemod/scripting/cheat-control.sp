@@ -200,8 +200,8 @@ public Action OnCheatCommand(int client, const char[] command, int argc) {
 
 	if (GetConVarBool(cheatcontrol_enablewarnings)) {
 		playerWarnings[client]++;
-
 		if (playerWarnings[client] >= maxWarnings) {
+			playerWarnings[client] = maxWarnings;
 			if (bSourceBansAvailable) {
 				char reason[48];
 				Format(reason, sizeof(reason), "Permission denied to command %s", command);
@@ -227,9 +227,6 @@ public Action OnCheatCommand(int client, const char[] command, int argc) {
 			}
 		}
 	}
-
-
-
 	return Plugin_Handled;
 }
 
